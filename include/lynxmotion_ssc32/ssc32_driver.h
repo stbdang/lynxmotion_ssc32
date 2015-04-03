@@ -21,8 +21,8 @@ struct Joint
 		int channel;
 		double min_angle;
 		double max_angle;
-		double offset_angle; // this angle is considered to be 1500 uS
-		double default_angle; // angle that the joint is initialized to (defaults to the offset_angle)
+		int min_offset; // this is the value in us at min_angle
+		double default_angle; // angle that the joint is initialized to
 		bool initialize; // Indicates whether to initialize the servo to the default angle on startup.
 		bool invert;
 	};
@@ -80,7 +80,7 @@ class SSC32Driver
 
 	private:
 		void publishJointStates( );
-		void jointCallback( const ros::MessageEvent<trajectory_msgs::JointTrajectory const>& event );
+		void jointCallback( const ros::MessageEvent<trajectory_msgs::JointTrajectory const>& event, const std::string &topic );
 		void execute_command( std::string );
 
 		ros::NodeHandle nh;
@@ -94,7 +94,8 @@ class SSC32Driver
 		int baud;
 		bool publish_joint_states;
 		double range_scale;
-		double scale;
+//		double scale;
+		double us_per_deg;
 		std::vector<Controller*> controllers;
 		std::map<std::string, Controller*> controllers_map;
 		std::map<std::string, Joint*> joints_map;

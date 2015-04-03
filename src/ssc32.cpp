@@ -1,7 +1,9 @@
 #include "lynxmotion_ssc32/ssc32.h"
+#include <ros/ros.h>
+#include <unistd.h>
 
 #ifndef DEBUG
-#define DEBUG 0
+#define DEBUG 1
 #endif
 
 namespace lynxmotion_ssc32
@@ -25,9 +27,10 @@ SSC32::~SSC32( )
 bool SSC32::open_port( const char *port, int baud )
 {
 	struct termios options;
-
+printf("%s :%d\n", __func__, __LINE__);
 	close_port( );
 
+printf("%s :%d\n", __func__, __LINE__);
 	switch( baud )
 	{
 		case 2400:
@@ -47,6 +50,7 @@ bool SSC32::open_port( const char *port, int baud )
 			return false;
 	}
 
+printf("%s :%d\n", __func__, __LINE__);
 	fd = open( port, O_RDWR | O_NOCTTY );
 
 	if( fd < 0 )
@@ -55,6 +59,7 @@ bool SSC32::open_port( const char *port, int baud )
 		return false;
 	}
 
+printf("%s :%d\n", __func__, __LINE__);
 	if( fcntl( fd, F_SETFL, 0 ) < 0 )
 	{
 		printf( "ERROR: port [%s] is already locked\n", port );
@@ -110,9 +115,10 @@ void SSC32::close_port( )
 
 bool SSC32::send_message( const char *msg, int size )
 {
+        ROS_INFO("MEH : %s", msg);
 	if( fd != -1 )
 	{
-		tcflush( fd, TCIOFLUSH );
+		tcdrain( fd );
 
 #if DEBUG
 		printf( "INFO: [send_message] Sending message: " );

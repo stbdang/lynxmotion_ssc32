@@ -276,6 +276,42 @@ int main( int argc, char **argv )
 		for( int j = 0; j < 4; j++ )
 			std::cout << "Pin " << ( ( char )j + 'A' ) << ": " << data[j] << std::endl;
 	}
+        else if( strcmp( argv[i], "--dk_test" ) == 0 )
+        {
+	    if( !ssc32_device.open_port( port.c_str( ), baud ) )
+	    	return 1;
+
+	    lynxmotion_ssc32::SSC32::ServoCommand cmd[3];
+            cmd[0].ch = 0;
+            cmd[1].ch = 1;
+            cmd[2].ch = 2;
+
+	    lynxmotion_ssc32::SSC32::ServoCommand cmd2[3];
+            cmd2[0].ch = 12;
+            cmd2[1].ch = 13;
+            cmd2[2].ch = 14;
+            for (int i = 0; i <3; i++) {
+                cmd[0].pw = 1977;
+                cmd[1].pw = 1891;
+                cmd[2].pw = 1520;
+                ssc32_device.move_servo(cmd, 3);
+                cmd2[0].pw = 1103;
+                cmd2[1].pw = 1049;
+                cmd2[2].pw = 1480;
+                ssc32_device.move_servo(cmd2, 3);
+                sleep(1);
+                cmd[0].pw = 1877;
+                cmd[1].pw = 1791;
+                cmd[2].pw = 1420;
+                ssc32_device.move_servo(cmd, 3);
+                cmd2[0].pw = 1103+100;
+                cmd2[1].pw = 1049+100;
+                cmd2[2].pw = 1480+100;
+                ssc32_device.move_servo(cmd2, 3);
+                sleep(1);
+            }
+            
+        }
 	else
 	{
 		std::cout << argv[0] << ": invalid option -- '" << argv[i] << "'" << std::endl;

@@ -17,6 +17,7 @@ SSC32Driver::SSC32Driver( ros::NodeHandle &nh ) :
 	priv_nh.param<int>( "baud", baud, 115200 );
 	priv_nh.param<bool>( "publish_joint_states", publish_joint_states, true );
 
+#if 0
 	// 180 degree servos seem to have a slightly greater range than 180 degrees.
 	// This parameter allows for scaling the range for attempting to get
 	// it to be closer to 180 degrees, or 90 degrees for 90 degree servos.
@@ -25,6 +26,10 @@ SSC32Driver::SSC32Driver( ros::NodeHandle &nh ) :
 	if ( range_scale > 1 || range_scale <= 0 )
 		range_scale = 1.0;
 	scale = range_scale * 2000.0 / M_PI;
+#endif
+
+        // DK - Added us_per_deg - this is easier for me.
+	priv_nh.param<double>( "us_per_deg", us_per_deg, 10.222 );
 
 	// Parse joints ros param
 	XmlRpc::XmlRpcValue joints_list;
@@ -52,8 +57,8 @@ SSC32Driver::SSC32Driver( ros::NodeHandle &nh ) :
 
 			priv_nh.param<double>( joint_graph_name + "max_angle", joint->properties.max_angle, M_PI_2 );
 			priv_nh.param<double>( joint_graph_name + "min_angle", joint->properties.min_angle, -M_PI_2 );
-			priv_nh.param<double>( joint_graph_name + "offset_angle", joint->properties.offset_angle, 0 );
-			priv_nh.param<double>( joint_graph_name + "default_angle", joint->properties.default_angle, joint->properties.offset_angle );
+			priv_nh.param<int>( joint_graph_name + "min_offset", joint->properties.min_offset, 0 );
+			priv_nh.param<double>( joint_graph_name + "default_angle", joint->properties.default_angle, 0 );
 			priv_nh.param<bool>( joint_graph_name + "initialize", joint->properties.initialize, true );
 			priv_nh.param<bool>( joint_graph_name + "invert", joint->properties.invert, false );
 
@@ -201,54 +206,66 @@ SSC32Driver::~SSC32Driver( )
 
 bool SSC32Driver::init( )
 {
-	SSC32::ServoCommand *cmd;
-	bool success = true;
-
-	// Initialize each controller
-	for( unsigned int i = 0; i < controllers.size( ); i++ )
-	{
-		ROS_DEBUG( "Initializing controller %s", controllers[i]->name.c_str( ) );
-
-		// Only initialize the controller if it's a joint controller
-		if( controllers[i]->type == ControllerTypes::JointController )
-		{
-			cmd = new SSC32::ServoCommand[controllers[i]->joints.size( )];
-
-			for( unsigned int j = 0; j < controllers[i]->joints.size( ); j++ )
-			{
-				Joint *joint = controllers[i]->joints[j];
-
-				if( joint->properties.initialize )
-				{
-					cmd[j].ch = joint->properties.channel;
-					cmd[j].pw = ( unsigned int )( scale * ( joint->properties.default_angle - joint->properties.offset_angle ) + 1500 + 0.5 );
-
-
-					ROS_INFO( "Initializing channel %d to pulse width %d", cmd[j].ch, cmd[j].pw );
-
-					if( joint->properties.invert )
-						cmd[j].pw = 3000 - cmd[j].pw;
-
-					if( cmd[j].pw < 500 )
-						cmd[j].pw = 500;
-					else if( cmd[j].pw > 2500 )
-						cmd[j].pw = 2500;
-				}
-			}
-
-			// Send command
-			if( !ssc32_dev.move_servo( cmd, controllers[i]->joints.size( ) ) )
-			{
-				ROS_ERROR( "Failed initializing controller %s", controllers[i]->name.c_str( ) );
-				success = false;
-			}
-
-			delete[] cmd;
-		}
-	}
-
-	return success;
+    SSC32::ServoCommand *cmd;
+    bool success = true;
+    
+    // Initialize each controller
+    for( unsigned int i = 0; i < controllers.size( ); i++ )
+    {
+        ROS_DEBUG( "Initializing controller %s", controllers[i]->name.c_str( ) );
+    
+        // Only initialize the controller if it's a joint controller
+        if( controllers[i]->type == ControllerTypes::JointController )
+        {
+            int numJointToInit = 0;
+    
+            for( unsigned int j = 0; j < controllers[i]->joints.size( ); j++ )
+            {
+                Joint *joint = controllers[i]->joints[j];
+                if( joint->properties.initialize )
+                {
+                    numJointToInit++;
+                }
+            }
+    
+            if ( numJointToInit > 0 )
+            {
+        	    cmd = new SSC32::ServoCommand[numJointToInit];
+    
+        	    for( unsigned int j = 0; j < controllers[i]->joints.size( ); j++ )
+        	    {
+        	    	Joint *joint = controllers[i]->joints[j];
+    
+        	    	if( joint->properties.initialize )
+        	    	{
+        	    		cmd[j].ch = joint->properties.channel;
+        	    		cmd[j].pw = ( unsigned int )( ( (joint->properties.invert ? -1 : 1 ) * ( joint->properties.default_angle - joint->properties.min_angle ) * us_per_deg )+ joint->properties.min_offset + 0.5 );
+    
+    
+        	    		ROS_INFO( "Initializing channel %d to pulse width %d", cmd[j].ch, cmd[j].pw );
+    
+        	    		if( cmd[j].pw < 500 )
+        	    			cmd[j].pw = 500;
+        	    		else if( cmd[j].pw > 2500 )
+        	    			cmd[j].pw = 2500;
+        	    	}
+        	    }
+    
+        	    // Send command
+        	    if( !ssc32_dev.move_servo( cmd, controllers[i]->joints.size( ) ) )
+        	    {
+        	    	ROS_ERROR( "Failed initializing controller %s", controllers[i]->name.c_str( ) );
+        	    	success = false;
+        	    }
+    
+        	    delete[] cmd;
+            }
+        }
+    }
+    
+    return success;
 }
+
 
 bool SSC32Driver::relaxJoints( )
 {
@@ -319,7 +336,8 @@ bool SSC32Driver::start( )
 	for( unsigned int i = 0; i < controllers.size( ); i++ )
 	{
 		joint_state_pubs_map[controllers[i]->name] = nh.advertise<sensor_msgs::JointState>( controllers[i]->name + "/joint_states", 1 );
-		joint_subs.push_back( nh.subscribe( controllers[i]->name + "/command", 1, &SSC32Driver::jointCallback, this ) );
+		joint_subs.push_back( nh.subscribe<trajectory_msgs::JointTrajectory>( controllers[i]->name + "/command", 1, 
+                            boost::bind(&SSC32Driver::jointCallback, this, _1, controllers[i]->name + "/command") ) );
 	}
 
 	return true;
@@ -371,10 +389,7 @@ void SSC32Driver::publishJointStates( )
 
 				int pw = ssc32_dev.query_pulse_width( controllers[i]->joints[j]->properties.channel );
 
-				if( controllers[i]->joints[j]->properties.invert )
-					pw = 3000 - pw;
-
-				double angle = ( ( double ) pw - 1500.0 ) / scale + controllers[i]->joints[j]->properties.offset_angle;
+				double angle = ( ( double ) pw - controllers[i]->joints[j]->properties.min_offset ) / us_per_deg *(controllers[i]->joints[j]->properties.invert ? -1.0 : 1.0) + controllers[i]->joints[j]->properties.min_angle;
 
 				joints.position.push_back( angle );
 			}
@@ -386,97 +401,98 @@ void SSC32Driver::publishJointStates( )
 	}
 }
 
-void SSC32Driver::jointCallback( const ros::MessageEvent<trajectory_msgs::JointTrajectory const>& event )
+void SSC32Driver::jointCallback( const ros::MessageEvent<trajectory_msgs::JointTrajectory const>& event, const std::string &topic_path )
 {
-	ros::M_string connection_header = event.getConnectionHeader( );
-	const trajectory_msgs::JointTrajectoryConstPtr &msg = event.getMessage( );
-
-	std::string topic = connection_header["topic"];
-
-	if( topic.empty( ) )
-	{
-		ROS_ERROR( "The connection header topic is empty" );
-		return;
-	}
-
-	// Remove beginning '/'
-	if( topic[0] == '/')
-		topic.erase( 0, 1 );
-
-	// Extract the controller name from the topic
-	std::string::iterator it = find( topic.begin( ), topic.end( ), '/' );
-	if( it != topic.end( ) )
-		topic.erase( it, topic.end( ) );
-
-	// Validate the controller name
-	if( controllers_map.find( topic ) == controllers_map.end() )
-	{
-		ROS_ERROR( "[%s] is not a valid controller name.", topic.c_str( ) );
-		return;
-	}
-
-	int num_joints = controllers_map[topic]->joints.size( );
-
-	ros::Duration prev_time_from_start = ros::Duration( 0 );
-
-	for( unsigned int i = 0; i < msg->points.size(); i++ )
-	{
-		SSC32::ServoCommand *cmd = new SSC32::ServoCommand[num_joints];
-		bool invalid = false;
-
-		for( unsigned int j = 0; j < msg->joint_names.size( ) && !invalid; j++ )
-		{
-			if( joints_map.find( msg->joint_names[j] ) != joints_map.end( ) )
-			{
-				Joint *joint = joints_map[msg->joint_names[j]];
-
-				double angle = msg->points[i].positions[j];
-
-				// Validate the commanded position (angle)
-				if( angle >= joint->properties.min_angle && angle <= joint->properties.max_angle )
-				{
-					cmd[j].ch = joint->properties.channel;
-					cmd[j].pw = ( unsigned int )( scale * ( angle - joint->properties.offset_angle ) + 1500 + 0.5 );
-					if( joint->properties.invert )
-						cmd[j].pw = 3000 - cmd[j].pw;
-					if( cmd[j].pw < 500 )
-						cmd[j].pw = 500;
-					else if( cmd[j].pw > 2500 )
-						cmd[j].pw = 2500;
-
-					if( msg->points[i].velocities.size( ) > j && msg->points[i].velocities[j] > 0 )
-						cmd[j].spd = scale * msg->points[i].velocities[j];
-				}
-				else // invalid angle given
-				{
-					invalid = true;
-					ROS_ERROR( "The given position [%f] for joint [%s] is invalid", angle, joint->name.c_str( ) );
-				}
-			}
-			else
-			{
-				invalid = true;
-				ROS_ERROR( "Joint [%s] does not exist", msg->joint_names[i].c_str( ) );
-			}
-		}
-
-		// Queue the command for execution
-		if(!invalid)
-		{
-			Command command;
-			command.cmd = cmd;
-			command.num_joints = num_joints;
-			command.start_time = current_time + prev_time_from_start;
-			command.duration = msg->points[i].time_from_start - prev_time_from_start;
-
-			// Queue the command on the controller's command queue
-			command_queues[topic].push( command );
-		}
-		else
-			delete[] cmd;
-
-		prev_time_from_start = msg->points[i].time_from_start;
-	}
+#if 0
+    ros::M_string connection_header = event.getConnectionHeader( );
+    
+    std::string topic = connection_header["topic"];
+    
+    if( topic.empty( ) )
+    {
+    	ROS_ERROR( "The connection header topic is empty" );
+    	return;
+    }
+    
+#endif
+    std::string topic = topic_path;
+    const trajectory_msgs::JointTrajectoryConstPtr &msg = event.getMessage( );
+    // Remove beginning '/'
+    if( topic[0] == '/')
+    	topic.erase( 0, 1 );
+    
+    // Extract the controller name from the topic
+    std::string::iterator it = find( topic.begin( ), topic.end( ), '/' );
+    if( it != topic.end( ) )
+    	topic.erase( it, topic.end( ) );
+    
+    // Validate the controller name
+    if( controllers_map.find( topic ) == controllers_map.end() )
+    {
+    	ROS_ERROR( "[%s] is not a valid controller name.", topic.c_str( ) );
+    	return;
+    }
+    
+    int num_joints = controllers_map[topic]->joints.size( );
+    
+    ros::Duration prev_time_from_start = ros::Duration( 0 );
+    
+    for( unsigned int i = 0; i < msg->points.size(); i++ )
+    {
+    	SSC32::ServoCommand *cmd = new SSC32::ServoCommand[num_joints];
+    	bool invalid = false;
+    
+    	for( unsigned int j = 0; j < msg->joint_names.size( ) && !invalid; j++ )
+    	{
+    		if( joints_map.find( msg->joint_names[j] ) != joints_map.end( ) )
+    		{
+    			Joint *joint = joints_map[msg->joint_names[j]];
+    
+    			double angle = msg->points[i].positions[j];
+    
+    			// Validate the commanded position (angle)
+    			if( angle >= joint->properties.min_angle && angle <= joint->properties.max_angle )
+    			{
+    				cmd[j].ch = joint->properties.channel;
+    				cmd[j].pw = ( unsigned int )( ( angle - joint->properties.min_angle ) * us_per_deg * ( joint->properties.invert ? -1 : 1 ) + joint->properties.min_offset + 0.5);
+    				if( cmd[j].pw < 500 )
+    					cmd[j].pw = 500;
+    				else if( cmd[j].pw > 2500 )
+    					cmd[j].pw = 2500;
+    
+    				if( msg->points[i].velocities.size( ) > j && msg->points[i].velocities[j] > 0 )
+    					cmd[j].spd = us_per_deg * msg->points[i].velocities[j];
+    			}
+    			else // invalid angle given
+    			{
+    				invalid = true;
+    				ROS_ERROR( "The given position [%f] for joint [%s] is invalid", angle, joint->name.c_str( ) );
+    			}
+    		}
+    		else
+    		{
+    			invalid = true;
+    			ROS_ERROR( "Joint [%s] does not exist", msg->joint_names[i].c_str( ) );
+    		}
+    	}
+    
+    	// Queue the command for execution
+    	if(!invalid)
+    	{
+    		Command command;
+    		command.cmd = cmd;
+    		command.num_joints = num_joints;
+    		command.start_time = current_time + prev_time_from_start;
+    		command.duration = msg->points[i].time_from_start - prev_time_from_start;
+    
+    		// Queue the command on the controller's command queue
+    		command_queues[topic].push( command );
+    	}
+    	else
+    		delete[] cmd;
+    
+    	prev_time_from_start = msg->points[i].time_from_start;
+    }
 }
 
 void SSC32Driver::execute_command( std::string controller )

@@ -3,7 +3,7 @@
 #include <unistd.h>
 
 #ifndef DEBUG
-#define DEBUG 1
+#define DEBUG 0
 #endif
 
 namespace lynxmotion_ssc32
@@ -103,6 +103,8 @@ void SSC32::close_port( )
 	if( fd != -1 )
 	{
 		printf( "Closing port\n" );
+                tcdrain( fd );
+	        tcflush( fd, TCIOFLUSH );
 
 		close( fd );
 

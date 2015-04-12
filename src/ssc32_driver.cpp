@@ -291,6 +291,7 @@ bool SSC32Driver::relaxJointsCallback( std_srvs::Empty::Request& request, std_sr
 bool SSC32Driver::spin( )
 {
 	bool result = true;
+        ros::Rate r(100);
 
 	if( start( ) && init( ) )
 	{
@@ -301,6 +302,7 @@ bool SSC32Driver::spin( )
 			update( );
 
 			ros::spinOnce( );
+                        r.sleep();
 		}
 	}
 	else
